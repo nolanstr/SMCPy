@@ -9,8 +9,11 @@ class BaseLogLike:
 
     def _get_output(self, inputs):
         output = self._model(inputs)
-        if np.isnan(output).any():
-            raise ValueError
+        #if np.isnan(output).any():
+        #    raise ValueError
+        #This is the update to make it so models that evaluate to nan can remove
+        # those particles
+        output[np.where(np.isnan(output))[0]] = np.inf
         return output
 
 
@@ -72,7 +75,6 @@ class MultiSourceNormal(Normal):
             raise ValueError("data segments in args[0] must sum to dim of data")
 
     def __call__(self, inputs):
-
         std_devs, inputs = self._process_fixed_and_variable_std(inputs)
 
         output = self._get_output(inputs)

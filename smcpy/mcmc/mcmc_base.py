@@ -34,7 +34,6 @@ class MCMCBase(ABC):
         log_priors, log_like = self._initialize_probabilities(inputs)
 
         for i in range(num_samples):
-
             inputs, log_like, log_priors, rejected = \
                 self._perform_mcmc_step(inputs, cov, log_like, log_priors, phi)
 
@@ -158,7 +157,6 @@ class MCMCBase(ABC):
         inputs = np.where(rejected, inputs, new_inputs)
         log_like = np.where(rejected, log_like, new_log_like)
         log_priors = np.where(rejected, log_priors, new_log_priors)
-
         return inputs, log_like, log_priors, rejected
 
     @staticmethod
