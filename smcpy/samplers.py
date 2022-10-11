@@ -129,7 +129,7 @@ class AdaptiveSampler(SamplerBase):
             phi = self._check_phi_sequence(phi_sequence, phi, required_phi)
 
             dphi = phi - phi_sequence[-1]
-            if dphi < 1e-8:
+            if dphi < 1e-12:
                 raise ValueError('dphi too small for convergence')
             step_list.append(self._do_smc_step(step_list[-1], phi, dphi,
                                                num_mcmc_samples))
