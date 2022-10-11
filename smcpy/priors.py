@@ -1,7 +1,7 @@
 import numpy as np
 
 from scipy.stats import invwishart
-
+from scipy.stats import invgamma
 
 class ImproperUniform:
 
@@ -29,6 +29,38 @@ class ImproperUniform:
         in_bounds = (array_x >= self._lower) & (array_x <= self._upper)
         return np.add(prior_pdf, 1, out=prior_pdf, where=in_bounds)
 
+
+class InvGamma:
+
+    def __init__(self, alpha=1, beta=1):
+
+        self._alpha = alpha
+        self._beta = beta
+    
+    @property
+    def alpha(self):
+        return self._alpha
+
+    @alpha.setter
+    def alpha(self, alpha):
+        self._alpha = alpha
+
+    @property
+    def beta(self):
+        return self._beta
+
+    @beta.setter
+    def beta(self, beta):
+        self._beta = beta
+
+    def pdf(self, x):
+        
+        array_x = np.array(x).squeeze()
+
+        if array_x.ndim > 1:
+            raise ValueError('Input array must be 1D or must squeeze to 1D')
+
+        return invgamma.pdf(array_x, a=self.alpha, loc=1./self.beta)
 
 
 class InvWishart:
