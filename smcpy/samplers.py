@@ -119,7 +119,6 @@ class AdaptiveSampler(SamplerBase):
         :type required_phi: float, int, or list
         '''
         self._updater = Updater(ess_threshold=1) # ensure always resampling
-
         step_list = [self._initialize(num_particles, proposal)]
 
         phi_sequence = [0]

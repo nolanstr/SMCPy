@@ -32,10 +32,14 @@ class ImproperUniform:
 
 class InvGamma:
 
-    def __init__(self, alpha=1, beta=1):
-
-        self._alpha = alpha
-        self._beta = beta
+    def __init__(self, alpha=1, beta=1, particles=None):
+        
+        if particles is None:
+            self._alpha = alpha
+            self._beta = beta
+        else:
+            self._alpha = alpha
+            self._beta = np.array([beta] * particles)
     
     @property
     def alpha(self):
@@ -59,8 +63,7 @@ class InvGamma:
 
         if array_x.ndim > 1:
             raise ValueError('Input array must be 1D or must squeeze to 1D')
-
-        return invgamma.pdf(array_x, a=self.alpha, loc=1./self.beta)
+        return invgamma.pdf(array_x, a=self.alpha, loc=self.beta)
 
 
 class InvWishart:
