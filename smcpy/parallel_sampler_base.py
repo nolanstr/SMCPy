@@ -30,36 +30,59 @@ ANY SUCH MATTER SHALL BE THE IMMEDIATE, UNILATERAL TERMINATION OF THIS
 AGREEMENT.
 '''
 
-
-from .particles import Particles
-from ..mcmc.kernel_base import MCMCKernel
-from ..parallel_mcmc.parallel_kernel_base import ParallelMCMCKernel
-from copy import copy
 import numpy as np
 
+from abc import ABC, abstractmethod
 
-class Mutator:
-    '''
-    Mutates particles using an MCMC kernel.
-    '''
+from .parallel_smc.initializer import Initializer
+from .parallel_smc.mutator import Mutator
+
+
+class ParallelSamplerBase:
+
     def __init__(self, mcmc_kernel):
-        self.mcmc_kernel = mcmc_kernel
-
-    def mutate(self, particles, phi, num_samples):
-        cov = particles.compute_covariance()
-        mutated = self.mcmc_kernel.mutate_particles(particles.param_dict,
-                                                    particles.log_likes,
-                                                    num_samples,
-                                                    cov, phi)
-        particles = Particles(mutated[0], mutated[1], particles.log_weights)
-        return particles
-
-    @property
-    def mcmc_kernel(self):
-        return self._mcmc_kernel
-
-    @mcmc_kernel.setter
-    def mcmc_kernel(self, mcmc_kernel):
-        if not isinstance(mcmc_kernel, (MCMCKernel, ParallelMCMCKernel)):
-            raise TypeError
         self._mcmc_kernel = mcmc_kernel
+        self._initializer = Initializer(self._mcmc_kernel)
+        self._mutator = Mutator(self._mcmc_kernel)
+        self._updater = None
+        self._mutation_ratio = 1
+
+    @abstractmethod
+    def sample(self):
+        '''
+        Performs SMC sampling. Returns step list and estimates of marginal
+        log likelihood at each step.
+        '''
+
+    def _initialize(self, num_particles, proposal, parallel):
+        if proposal is None:
+            return self._initializer.init_particles_from_prior(num_particles,
+                    parallel)
+        else:
+            return self._initializer.init_particles_from_samples(*proposal,
+                    parallel)
+
+    def _do_smc_step(self, particles, phi, delta_phi, num_mcmc_samples):
+        particles = self._updater.update(particles, delta_phi)
+        mut_particles = self._mutator.mutate(particles, phi,
+                                                num_mcmc_samples)
+        self._compute_mutation_ratio(particles, mut_particles)
+        return mut_particles
+
+    def _compute_mutation_ratio(self, old_particles, new_particles):
+        mutated = ~np.all(new_particles.params == old_particles.params, axis=1)
+        self._mutation_ratio = sum(mutated) / new_particles.params.shape[0]
+
+    def _estimate_marginal_log_likelihoods(self):
+        sum_un_log_wts = [np.zeros(len(self.steps))] + [self._logsum(ulw) \
+                          for ulw in self._updater._unnorm_log_weights]
+        num_updates = len(sum_un_log_wts[0])
+        mlls = np.cumsum(sum_un_log_wts, axis=0) 
+        return mlls.T
+
+    @staticmethod
+    def _logsum(Z):
+        Z = -np.sort(-Z, axis=0) # descending
+        Z0 = Z[0, :]
+        Z_shifted = Z[1:, :] - Z0
+        return Z0 + np.log(1 + np.sum(np.exp(Z_shifted), axis=0))

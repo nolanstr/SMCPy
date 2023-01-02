@@ -31,17 +31,18 @@ AGREEMENT.
 '''
 
 import numpy as np
+import copy
 
 from scipy.optimize import bisect
 from tqdm import tqdm
 
-from .sampler_base import SamplerBase
-from .smc.updater import Updater
+from .parallel_sampler_base import ParallelSamplerBase
+from .parallel_smc.updater import Updater
 from .utils.progress_bar import set_bar
 from .utils.mpi_utils import rank_zero_output_only
 
 
-class FixedSampler(SamplerBase):
+class FixedSampler(ParallelSamplerBase):
 
     def __init__(self, mcmc_kernel):
         super().__init__(mcmc_kernel)
@@ -88,8 +89,7 @@ class FixedSampler(SamplerBase):
         return step_list, self._estimate_marginal_log_likelihoods()
 
 
-
-class AdaptiveSampler(SamplerBase):
+class AdaptiveSampler(ParallelSamplerBase):
 
     def __init__(self, mcmc_kernel):
         self.phi_sequence = None
@@ -98,7 +98,8 @@ class AdaptiveSampler(SamplerBase):
 
     @rank_zero_output_only
     def sample(self, num_particles, num_mcmc_samples, target_ess=1,
-               proposal=None, required_phi=1):
+               proposal=None, parallel=1, required_phi=1,
+               resample_parallel=False):
         '''
         :param num_particles: number of particles
         :type num_particles: int
@@ -119,38 +120,55 @@ class AdaptiveSampler(SamplerBase):
         :type required_phi: float, int, or list
         '''
         self._updater = Updater(ess_threshold=1) # ensure always resampling
-        step_list = [self._initialize(num_particles, proposal)]
+        step_list = [self._initialize(num_particles, proposal, parallel)]
+        phi_sequence = [np.zeros(parallel)]
+        self.steps = np.zeros(parallel).astype(np.int)
 
-        phi_sequence = [0]
-        while phi_sequence[-1] < 1:
+        while np.any(phi_sequence[-1] < 1):
+            self.steps[np.where(phi_sequence[-1]<1)[0]] += 1
+            #import pdb;pdb.set_trace()
             phi = self.optimize_step(step_list[-1], phi_sequence[-1],
                                      target_ess, required_phi)
             phi = self._check_phi_sequence(phi_sequence, phi, required_phi)
             dphi = phi - phi_sequence[-1]
-            if dphi < 1e-12:
+            
+            if np.all(dphi < 1e-12):
                 raise ValueError('dphi too small for convergence')
-            step_list.append(self._do_smc_step(step_list[-1], phi, dphi,
-                                           num_mcmc_samples))
-            phi_sequence.append(phi)
-        
-        self.phi_sequence = np.array(phi_sequence)
-        self.req_phi_index = [i for i, phi in enumerate(phi_sequence) \
-                              if phi in self._as_phi_list(required_phi)]
 
+            if np.any(dphi < 1e-12):
+                bad_idxs = np.where(dphi < 1e-12)
+                for bad_idx in bad_idxs:
+                    phi[bad_idx] = 1
+
+            step_list.append(self._do_smc_step(step_list[-1], phi, dphi, 
+                                                        num_mcmc_samples))
+            phi_sequence.append(phi)
+
+        self.phi_sequence = np.array(phi_sequence)
+        self.req_phi_index = np.array([np.where(
+                                    self.phi_sequence[:,i]==required_phi)[0][0] \
+                                    for i in range(self.phi_sequence.shape[1])])
         return step_list, self._estimate_marginal_log_likelihoods()
 
     @rank_zero_output_only
-    def optimize_step(self, particles, phi_old, target_ess=1, required_phi=1):
-        if self._single_step_has_pos_ess_margin(phi_old, particles, target_ess):
-            return 1
-        phi = bisect(self.predict_ess_margin, phi_old, 1,
-                     args=(phi_old, particles, target_ess))
-        proposed_phi_list = self._as_phi_list(required_phi)
-        proposed_phi_list.append(phi)
-        return self._select_phi(proposed_phi_list, phi_old)
+    def optimize_step(self, particles, phi_old, target_ess=1, req_phi=1):
+        if np.all(self._single_step_has_pos_ess_margin(phi_old, particles,
+                                                                target_ess)):
+            return np.ones(particles._parallel)
+        phi = np.zeros_like(phi_old)
+        for i in range(phi_old.shape[0]):
+            phi[i] = bisect(self.single_predict_ess_margin, phi_old[i], 1, 
+                            args=(phi_old[i], particles, i, target_ess))
+        return np.array(self._select_phi(phi, req_phi, phi_old))
 
     def predict_ess_margin(self, phi_new, phi_old, particles, target_ess=1):
-        beta = np.exp((phi_new - phi_old) * particles.log_likes)
+        beta = np.exp((phi_new - phi_old) * particles._log_likes)
+        ESS = np.sum(beta, axis=0) ** 2 / np.sum(beta ** 2, axis=0)
+        return ESS - particles.num_particles * target_ess
+
+    def single_predict_ess_margin(self, phi_new, phi_old, particles, idx,
+                                                            target_ess=1):
+        beta = np.exp((phi_new - phi_old) * particles._log_likes[:, idx])
         ESS = np.sum(beta) ** 2 / np.sum(beta ** 2)
         return ESS - particles.num_particles * target_ess
 
@@ -162,20 +180,23 @@ class AdaptiveSampler(SamplerBase):
         return phi
 
     @staticmethod
-    def _select_phi(proposed_phi_list, phi_old):
-        return min([p for p in proposed_phi_list if p > phi_old])
+    def _select_phi(proposed_phi_list, req_phi, phi_old):
+        req_phi_func = lambda a, b: req_phi if req_phi>min(a,b) and \
+                                                req_phi<max(a,b) else max(a,b)
+        return [req_phi_func(phi_i, phi_old_i) for phi_i, phi_old_i \
+                                                in zip(proposed_phi_list, phi_old)] 
 
     def _single_step_has_pos_ess_margin(self, phi_old, particles, target_ess):
-        return self.predict_ess_margin(1, phi_old, particles, target_ess) > 0
+        return self.predict_ess_margin(np.ones(phi_old.shape), phi_old, particles, target_ess) > 0
 
     def _check_phi_sequence(self, phi_sequence, phi, required_phi):
-        
-        if required_phi in phi_sequence:
-            return phi
-
-        elif phi > required_phi:
-            return required_phi
-        
-        else:
-            return phi
+        phi_sequence = np.vstack(phi_sequence)
+        for i in range(phi_sequence.shape[1]):
+            if required_phi in phi_sequence[:,i]:
+                phi[i] = phi[i]
+            elif phi[i] > required_phi:
+                phi[i] = required_phi
+            else:
+                phi[i] = phi[i]
+        return phi
 

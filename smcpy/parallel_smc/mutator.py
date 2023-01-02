@@ -31,7 +31,7 @@ AGREEMENT.
 '''
 
 
-from .particles import Particles
+from .particles import ParallelParticles
 from ..mcmc.kernel_base import MCMCKernel
 from ..parallel_mcmc.parallel_kernel_base import ParallelMCMCKernel
 from copy import copy
@@ -51,7 +51,8 @@ class Mutator:
                                                     particles.log_likes,
                                                     num_samples,
                                                     cov, phi)
-        particles = Particles(mutated[0], mutated[1], particles.log_weights)
+        particles = ParallelParticles(mutated[0], mutated[1],
+                particles.log_weights, parallel=particles._parallel)
         return particles
 
     @property

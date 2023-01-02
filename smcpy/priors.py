@@ -40,7 +40,7 @@ class InvGamma:
         else:
             self._alpha = alpha
             self._beta = np.array([beta] * particles)
-    
+        
     @property
     def alpha(self):
         return self._alpha
@@ -63,7 +63,8 @@ class InvGamma:
 
         if array_x.ndim > 1:
             raise ValueError('Input array must be 1D or must squeeze to 1D')
-        return invgamma.pdf(array_x, a=self.alpha, loc=self.beta)
+        weights = invgamma.pdf(array_x, a=self.alpha, scale=self.beta)
+        return weights
 
 
 class InvWishart:

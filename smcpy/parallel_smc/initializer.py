@@ -30,29 +30,23 @@ ANY SUCH MATTER SHALL BE THE IMMEDIATE, UNILATERAL TERMINATION OF THIS
 AGREEMENT.
 '''
 
-
-from .particles import Particles
-from ..mcmc.kernel_base import MCMCKernel
-from ..parallel_mcmc.parallel_kernel_base import ParallelMCMCKernel
-from copy import copy
 import numpy as np
 
+from copy import copy
 
-class Mutator:
+from .particles import ParallelParticles
+from ..mcmc.kernel_base import MCMCKernel
+from ..parallel_mcmc.parallel_kernel_base import ParallelMCMCKernel
+from ..utils.single_rank_comm import SingleRankComm
+
+
+class Initializer:
     '''
-    Mutates particles using an MCMC kernel.
+    Generates SMCStep objects based on either samples from a prior distribution
+    or given input samples from a sampling distribution.
     '''
     def __init__(self, mcmc_kernel):
         self.mcmc_kernel = mcmc_kernel
-
-    def mutate(self, particles, phi, num_samples):
-        cov = particles.compute_covariance()
-        mutated = self.mcmc_kernel.mutate_particles(particles.param_dict,
-                                                    particles.log_likes,
-                                                    num_samples,
-                                                    cov, phi)
-        particles = Particles(mutated[0], mutated[1], particles.log_weights)
-        return particles
 
     @property
     def mcmc_kernel(self):
@@ -63,3 +57,39 @@ class Mutator:
         if not isinstance(mcmc_kernel, (MCMCKernel, ParallelMCMCKernel)):
             raise TypeError
         self._mcmc_kernel = mcmc_kernel
+
+    def init_particles_from_prior(self, num_particles, parallel=1):
+        '''
+        Use model stored in MCMC kernel to sample initial set of particles.
+
+        :param num_particles: number of particles to sample (total across all
+            ranks)
+        :type num_particles: int
+        '''
+        params = self.mcmc_kernel.sample_from_prior(num_particles)
+        log_likes = self.mcmc_kernel.get_log_likelihoods(params)
+        log_weights = np.array([np.log(1/num_particles)] * num_particles)
+        particles = ParallelParticles(params, log_likes, log_weights, parallel)
+        return particles
+
+    def init_particles_from_samples(self, samples, proposal_pdensities,
+                                                                parallel=1):
+        '''
+        Initialize a set of particles using pre-sampled parameter values and
+        the corresponding prior pdf at those values.
+
+        :param samples: samples of parameters used to initialize particles;
+            must be a dictionary with keys = parameter names and values =
+            parameter values. Can also be a pandas DataFrame object for this
+            reason.
+        :type samples: dict, pandas.DataFrame
+        :param proposal_pdensities: corresponding probability density function
+            values; must be aligned with samples
+        :type proposal_pdensities: list or nd.array
+        '''
+        proposal_pdensities = np.array(proposal_pdensities).reshape(-1, 1)
+        log_likes = self.mcmc_kernel.get_log_likelihoods(samples)
+        log_priors = self.mcmc_kernel.get_log_priors(samples)
+        log_weights = log_priors - np.log(proposal_pdensities)
+        particles = ParallelParticles(samples, log_likes, log_weights, parallel)
+        return particles

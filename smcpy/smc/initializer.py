@@ -36,6 +36,7 @@ from copy import copy
 
 from .particles import Particles
 from ..mcmc.kernel_base import MCMCKernel
+from ..parallel_mcmc.parallel_kernel_base import ParallelMCMCKernel
 from ..utils.single_rank_comm import SingleRankComm
 
 
@@ -53,7 +54,7 @@ class Initializer:
 
     @mcmc_kernel.setter
     def mcmc_kernel(self, mcmc_kernel):
-        if not isinstance(mcmc_kernel, MCMCKernel):
+        if not isinstance(mcmc_kernel, (MCMCKernel, ParallelMCMCKernel)):
             raise TypeError
         self._mcmc_kernel = mcmc_kernel
 

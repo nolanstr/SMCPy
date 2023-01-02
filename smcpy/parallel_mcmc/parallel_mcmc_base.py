@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from smcpy.priors import InvGamma
 
-class MCMCBase(ABC):
+class ParallelMCMCBase(ABC):
     
     def __init__(self, model, data, priors, log_like_args, log_like_func,
                  debug):
@@ -32,19 +32,18 @@ class MCMCBase(ABC):
 
     def smc_metropolis(self, inputs, num_samples, cov, phi):
         self._update_priors(inputs, np.array([False]*inputs.shape[0]))
-        num_particles = inputs.shape[0]
+        num_particles = inputs.shape[1]
         log_priors, log_like = self._initialize_probabilities(inputs)
+
         for i in range(num_samples):
             inputs, log_like, log_priors, rejected = \
                 self._perform_mcmc_step(inputs, cov, log_like, log_priors, phi)
+            rejected = rejected.reshape((-1, num_particles))
+            num_accepted = num_particles - np.sum(rejected, axis=1)
 
-            num_accepted = num_particles - np.sum(rejected)
-
-            if num_accepted < inputs.shape[0] * 0.2:
-                cov = cov * 1/5
-            if num_accepted > inputs.shape[0] * 0.7:
-                cov = cov * 2
-        return inputs, log_like
+            cov[num_accepted < inputs.shape[1] * 0.2] *= 1/5
+            cov[num_accepted > inputs.shape[1] * 0.7] *= 2
+        return inputs, log_like.reshape(-1,num_particles)
 
     def metropolis(self, inputs, num_samples, cov, adapt_interval=None,
                    adapt_delay=0, progress_bar=False, **kwargs):
@@ -78,28 +77,30 @@ class MCMCBase(ABC):
 
     def evaluate_log_priors(self, inputs):
         prior_dims = self._get_prior_dims()
+        inputs = inputs.reshape((-1, len(prior_dims)))
 
         if inputs.shape[1] != sum(prior_dims):
             raise ValueError("Num prior distributions != num input params")
 
         prior_probs = np.empty((inputs.shape[0], len(self._priors)))
         in_start_idx = 0
+        #Will need to update this eventually for more complex priors.
         for i, p in enumerate(self._priors):
             in_ = inputs[:, in_start_idx:in_start_idx + prior_dims[i]]
+            vals = p.pdf(in_)
             prior_probs[:, i] = p.pdf(in_).squeeze()
             in_start_idx += prior_dims[i]
 
         nonzero_priors = prior_probs != 0
         log_priors = np.full(prior_probs.shape, -np.inf)
         log_priors = np.log(prior_probs, where=nonzero_priors, out=log_priors)
-        
         return log_priors
 
     def _get_prior_dims(self):
         return [p.dim if hasattr(p, 'dim') else 1 for p in self._priors]
 
     def evaluate_log_likelihood(self, inputs):
-        log_like = self._log_like_func(inputs)
+        log_like = self._log_like_func(inputs.reshape((-1,inputs.shape[-1])))
         return log_like.reshape(-1, 1)
 
     @staticmethod
@@ -110,9 +111,11 @@ class MCMCBase(ABC):
     def proposal(inputs, cov):
         scale_factor = 1#2.38 ** 2 / cov.shape[0] # From Smith 2014, pg. 172
         cov *= scale_factor
-        chol = np.linalg.cholesky(cov)
-        z = np.random.normal(0, 1, inputs.shape)
-        delta = np.matmul(chol, z.T).T
+        delta = np.zeros_like(inputs)
+        for i in range(delta.shape[0]):
+            chol = np.linalg.cholesky(cov[i])
+            z = np.random.normal(0, 1, inputs[i].shape)
+            delta[i] = np.matmul(chol, z.T).T
         return inputs + delta
 
     def acceptance_ratio(self, new_log_like, old_log_like, new_log_priors,
@@ -156,7 +159,9 @@ class MCMCBase(ABC):
         rejected = self.get_rejections(accpt_ratio)
         self._update_priors(new_inputs, rejected)
 
-        inputs = np.where(rejected, inputs, new_inputs)
+        inputs = np.where(rejected, inputs.reshape(-1,inputs.shape[-1]), 
+                                new_inputs.reshape(-1,inputs.shape[-1])
+                                                ).reshape(new_inputs.shape)
         log_like = np.where(rejected, log_like, new_log_like)
         log_priors = np.where(rejected, log_priors, new_log_priors)
         return inputs, log_like, log_priors, rejected
@@ -167,13 +172,14 @@ class MCMCBase(ABC):
         multisource_num_pts = self._log_like_func._args[0]
         multi_idxs = np.array([0] + list(multisource_num_pts))
         n_params = len(self._priors) - len(multisource_num_pts) 
-
-        output = self._eval_model(new_inputs)
+        d1, d2, d3 = new_inputs.shape
+        output = self._eval_model(new_inputs.reshape((d1*d2,d3))).reshape(
+                                                                (d1,d2,-1))
         squared_errors = np.square(self._data-output)
-
+            
         for i in range(len(multisource_num_pts)):
             if isinstance(self._priors[n_params+i], InvGamma):
-
+                raise NotImplementedError("Have not implemented change for InvGamma")
                 squared_errors_k_i = squared_errors[:,
                                                     multi_idxs[i]:multi_idxs[i+1]]
                 SSqk_i = np.sum(squared_errors_k_i, axis=1)
@@ -207,8 +213,9 @@ class MCMCBase(ABC):
     def _eval_log_like_if_prior_nonzero(self, log_priors, inputs):
         pos_rows = self._row_has_nonzero_prior_probability(log_priors)
         log_likes = np.zeros((log_priors.shape[0], 1))
-        if inputs[pos_rows].size != 0:
-            log_likes[pos_rows] = self.evaluate_log_likelihood(inputs[pos_rows])
+        if inputs.reshape((-1,inputs.shape[-1]))[pos_rows].size != 0:
+            log_likes[pos_rows] = self.evaluate_log_likelihood(
+                            inputs.reshape((-1,inputs.shape[-1]))[pos_rows])
         return log_likes
 
     @staticmethod
