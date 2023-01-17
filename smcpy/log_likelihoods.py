@@ -76,9 +76,7 @@ class MultiSourceNormal(Normal):
 
     def __call__(self, inputs):
         std_devs, inputs = self._process_fixed_and_variable_std(inputs)
-
         output = self._get_output(inputs)
-
         log_likes = []
         start_idx = 0
         for segment_len, segment_std_dev in zip(*[self._args[0], std_devs]):

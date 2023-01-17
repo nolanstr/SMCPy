@@ -9,41 +9,23 @@ class ParallelVectorMCMCKernel(ParallelMCMCKernel):
         self._mcmc = vector_mcmc_object
         self._param_order = param_order
 
-    def mutate_particles(self, param_dict, log_likes, num_samples, cov, phi):
-        #param_array = self._conv_param_dict_to_array(param_dict)
-        param_array = np.stack(param_dict.values()).T
-        param_array, log_likes = self._mcmc.smc_metropolis(param_array,
+    def mutate_particles(self, params, log_likes, num_samples, cov, phi):
+        params, log_likes = self._mcmc.smc_metropolis(params,
                                                            num_samples,
                                                            cov, phi)
-        param_dict = self._conv_param_array_to_dict(param_array)
-        return param_dict, log_likes
+        return params, log_likes
 
     def sample_from_prior(self, num_samples):
-        param_array = self._mcmc.sample_from_priors(num_samples)
-        return self._conv_param_array_to_dict(param_array)
+        return self._mcmc.sample_from_priors(num_samples)
 
-    def get_log_likelihoods(self, param_dict):
-        param_array = self._conv_param_dict_to_array(param_dict)
-        return self._mcmc.evaluate_log_likelihood(param_array)
 
-    def get_log_priors(self, param_dict):
-        param_array = self._conv_param_dict_to_array(param_dict)
-        if param_array.ndim == 2:
+    def get_log_likelihoods(self, params):
+        return self._mcmc.evaluate_log_likelihood(params)
+
+    def get_log_priors(self, params):
+        if params.ndim == 2:
             log_priors = self._mcmc.evaluate_log_priors(
-                                            param_array[np.newaxis,:,:])
+                                            params[np.newaxis,:,:])
         else:
-            log_priors = self._mcmc.evaluate_log_priors(param_array)
+            log_priors = self._mcmc.evaluate_log_priors(params)
         return np.sum(log_priors, axis=1).reshape(-1, 1)
-
-    def _conv_param_array_to_dict(self, param_array):
-        return dict(zip(self._param_order, param_array.T))
-
-    def _conv_param_dict_to_array(self, param_dict):
-        dim0 = 1
-        if not isinstance(param_dict[self._param_order[0]], (int, float)):
-            dim0 = len(param_dict[self._param_order[0]])
-        param_array = np.zeros((dim0, len(self._param_order)))
-
-        for i, k in enumerate(self._param_order):
-            param_array[:, i] = param_dict[k]
-        return param_array

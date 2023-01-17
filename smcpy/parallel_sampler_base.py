@@ -54,13 +54,13 @@ class ParallelSamplerBase:
         log likelihood at each step.
         '''
 
-    def _initialize(self, num_particles, proposal, parallel):
+    def _initialize(self, num_particles, proposal, parallel, param_names):
         if proposal is None:
             return self._initializer.init_particles_from_prior(num_particles,
                     parallel)
         else:
             return self._initializer.init_particles_from_samples(*proposal,
-                    parallel)
+                    param_names, parallel=parallel)
 
     def _do_smc_step(self, particles, phi, delta_phi, num_mcmc_samples):
         particles = self._updater.update(particles, delta_phi)
@@ -74,15 +74,16 @@ class ParallelSamplerBase:
         self._mutation_ratio = sum(mutated) / new_particles.params.shape[0]
 
     def _estimate_marginal_log_likelihoods(self):
-        sum_un_log_wts = [np.zeros(len(self.steps))] + [self._logsum(ulw) \
-                          for ulw in self._updater._unnorm_log_weights]
-        num_updates = len(sum_un_log_wts[0])
-        mlls = np.cumsum(sum_un_log_wts, axis=0) 
-        return mlls.T
+        sum_un_log_wts = [np.zeros(len(self.steps)).reshape((-1,1))] + \
+                [self._logsum(ulw) for ulw in self._updater._unnorm_log_weights]
+        sum_un_log_wts = np.hstack(sum_un_log_wts)
+        mlls = np.cumsum(sum_un_log_wts, axis=1) 
+        return mlls
 
     @staticmethod
     def _logsum(Z):
-        Z = -np.sort(-Z, axis=0) # descending
-        Z0 = Z[0, :]
-        Z_shifted = Z[1:, :] - Z0
-        return Z0 + np.log(1 + np.sum(np.exp(Z_shifted), axis=0))
+        Z = -np.sort(-Z, axis=1) # descending
+        Z0 = Z[:, 0].reshape((-1,1))
+        Z_shifted = Z[:, 1:] - Z0
+        return Z0 + np.log(1 + np.sum(np.exp(Z_shifted),
+                                        axis=1)).reshape((-1,1))

@@ -47,12 +47,15 @@ class Mutator:
 
     def mutate(self, particles, phi, num_samples):
         cov = particles.compute_covariance()
-        mutated = self.mcmc_kernel.mutate_particles(particles.param_dict,
+        cov[np.where(cov<=0)] = np.nan #temporary fix
+
+        mutated = self.mcmc_kernel.mutate_particles(particles.params,
                                                     particles.log_likes,
                                                     num_samples,
                                                     cov, phi)
         particles = ParallelParticles(mutated[0], mutated[1],
-                particles.log_weights, parallel=particles._parallel)
+                particles.log_weights, particles._param_names, 
+                parallel=particles._parallel)
         return particles
 
     @property

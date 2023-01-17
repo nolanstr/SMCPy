@@ -119,9 +119,11 @@ class AdaptiveSampler(SamplerBase):
         :type required_phi: float, int, or list
         '''
         self._updater = Updater(ess_threshold=1) # ensure always resampling
+        proposal[0]["std_dev0"] = np.array([0.10454041, 0.16707731, 0.10193468, 0.09496069,
+                        0.11545104])
         step_list = [self._initialize(num_particles, proposal)]
-
         phi_sequence = [0]
+        self.predict_ess_margin(1, 0, step_list[-1], target_ess)
         while phi_sequence[-1] < 1:
             phi = self.optimize_step(step_list[-1], phi_sequence[-1],
                                      target_ess, required_phi)
@@ -143,6 +145,7 @@ class AdaptiveSampler(SamplerBase):
     def optimize_step(self, particles, phi_old, target_ess=1, required_phi=1):
         if self._single_step_has_pos_ess_margin(phi_old, particles, target_ess):
             return 1
+        self.predict_ess_margin(0, 1, particles, 0.75)
         phi = bisect(self.predict_ess_margin, phi_old, 1,
                      args=(phi_old, particles, target_ess))
         proposed_phi_list = self._as_phi_list(required_phi)

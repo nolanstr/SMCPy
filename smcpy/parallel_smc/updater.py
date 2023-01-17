@@ -40,7 +40,7 @@ class Updater:
     Updates particle weights (and resamples if necessary) based on delta phi
     and particle state.
     '''
-    def __init__(self, ess_threshold):
+    def __init__(self, ess_threshold, parallel):
         '''
         :param ess_threshold: threshold on effective sample size (ess); if
             ess < ess_threshold, resampling with replacement is conducted.
@@ -48,7 +48,7 @@ class Updater:
         '''
         self.ess_threshold = ess_threshold
         self._ess = np.nan
-        self._resampled = False
+        self._resampled = [False]*parallel
         self._unnorm_log_weights = []
 
     @property
@@ -71,8 +71,8 @@ class Updater:
 
     def update(self, particles, delta_phi):
         new_log_weights = self._compute_new_weights(particles, delta_phi)
-        new_particles = ParallelParticles(particles.param_dict, particles.log_likes,
-                                  new_log_weights, particles._parallel)
+        new_particles = ParallelParticles(particles.params, particles.log_likes,
+                                  new_log_weights, particles.param_names, particles._parallel)
 
         new_particles = self.resample_if_needed(new_particles)
         return new_particles
@@ -80,7 +80,6 @@ class Updater:
     def resample_if_needed(self, new_particles):
         eff_sample_size = new_particles.compute_ess()
         self._ess = eff_sample_size
-        self._resampled = [False]*new_particles._parallel
         if np.any(eff_sample_size < self.ess_threshold *
                                                 new_particles.num_particles):
             for idx in np.where(eff_sample_size < self.ess_threshold *
@@ -90,21 +89,21 @@ class Updater:
         return new_particles
 
     def _compute_new_weights(self, particles, delta_phi):
-        un_log_weights = particles.log_weights + particles.log_likes * delta_phi
+        un_log_weights = particles.log_weights + particles.log_likes * \
+                                                delta_phi.reshape((-1,1))
         self._unnorm_log_weights.append(un_log_weights)
         return un_log_weights
 
     def _resample(self, particles, idx):
         u = np.random.uniform(0, 1, particles.num_particles)
-        resample_indices = np.digitize(u, np.cumsum(particles.weights[:,idx]))
+        resample_indices = np.digitize(u, np.cumsum(particles.weights[idx, :]))
 
-        new_params = particles.params[idx][resample_indices]
-
-        new_log_likes = particles.log_likes[:,idx][resample_indices]
+        new_params = particles.params[idx, resample_indices, :]
+        new_log_likes = particles.log_likes[idx, resample_indices]
 
         uniform_weights = [1/particles.num_particles] * particles.num_particles
         new_weights = np.log(uniform_weights)
         particles._params[idx] = new_params
-        particles._log_likes[:,idx] = new_log_likes
-        particles._log_weights[:,idx] = new_weights
+        particles._log_likes[idx, :] = new_log_likes
+        particles._log_weights[idx, :] = new_weights
         particles._set_and_norm_log_weights(particles.log_weights)

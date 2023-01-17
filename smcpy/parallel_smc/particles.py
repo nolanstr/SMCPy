@@ -64,7 +64,7 @@ class ParallelParticles(Checks):
     A container for particles during sequential monte carlo (SMC) sampling.
     '''
 
-    def __init__(self, params, log_likes, log_weights, parallel=1):
+    def __init__(self, params, log_likes, log_weights, param_names, parallel=1):
         '''
         :param params: model parameters; keys are parameter names and values
             are particle values
@@ -78,6 +78,7 @@ class ParallelParticles(Checks):
         self._param_names = None
         self._num_particles = None
         self._parallel = parallel
+        self._param_names = param_names
 
         self._set_params(params)
         self._set_log_likes(log_likes)
@@ -88,31 +89,25 @@ class ParallelParticles(Checks):
         return self._params
 
     def _set_params(self, params):
-        if not self._is_dict(params):
-            raise TypeError('"params" must be dict of array-like objects.')
-        self._param_names = tuple(params.keys())
-        self._params = np.stack(list(params.values())).T
+        if not isinstance(params, np.ndarray):
+            raise TypeError('"params" must be numpy array.')
+
+        self._params = params
         if self._params.ndim != 3:
             self._params = np.repeat(self._params[np.newaxis,:,:], self._parallel,
                                                                         axis=0)
         self._num_particles = self._params.shape[1]
 
     @property
-    def param_dict(self):
-        return dict(zip(self._param_names, self._params.T))
-
-    @property
     def log_likes(self):
         return self._log_likes
 
     def _set_log_likes(self, log_likes):
-        if log_likes.shape[1] == 1:
-            log_likes = np.tile(np.array(log_likes).reshape(-1, 1),
-                                                    self._parallel)
+        if log_likes.shape[0] != self._parallel:
+            log_likes = np.tile(np.array(log_likes), self._parallel)
         else:
-            log_likes = log_likes.reshape(-1, self._parallel)
-
-        if log_likes.shape[0] != self._num_particles:
+            log_likes = log_likes.reshape((self._parallel, -1))
+        if log_likes.shape[1] != self._num_particles:
             raise ValueError('log_likes.shape[0] != number particles: '
                              f'{log_likes.shape[0]} != {self._num_particles}')
         self._log_likes = log_likes
@@ -126,13 +121,12 @@ class ParallelParticles(Checks):
         return self._weights
 
     def _set_and_norm_log_weights(self, log_weights):
-        if log_weights.shape[1] == 1:
-            log_weights = np.tile(np.array(log_weights).reshape(-1, 1),
-                                                        self._parallel)
+        if log_weights.shape[0] != self._parallel: 
+            log_weights = np.tile(np.array(log_weights), self._parallel)
         else:
-            log_weights = log_weights.reshape(-1, self._parallel)
+            log_weights = log_weights.reshape((self._parallel,-1))
 
-        if log_weights.shape[0] != self._num_particles:
+        if log_weights.shape[1] != self._num_particles:
             raise ValueError('log_weights.shape[0] != number particles: '
                              f'{log_weights.shape[0]} != {self._num_particles}')
         self._log_weights = self._normalize_log_weights(log_weights)
@@ -150,8 +144,10 @@ class ParallelParticles(Checks):
         '''
         Normalizes log weights, and then transforms back into log space
         '''
-        shifted_weights = np.exp(log_weights - np.max(log_weights, axis=0))
-        normalized_weights = shifted_weights / np.sum(shifted_weights, axis=0)
+        shifted_weights = np.exp(log_weights - np.max(log_weights,
+                                                        axis=1).reshape((-1,1)))
+        normalized_weights = shifted_weights / np.sum(shifted_weights,
+                                                        axis=1).reshape((-1,1))
         log_zero_weights = np.ones(normalized_weights.shape) * -np.inf
         return np.log(normalized_weights, out=log_zero_weights,
                       where=normalized_weights > 0)
@@ -166,14 +162,14 @@ class ParallelParticles(Checks):
         '''
         Computes the effective sample size (ess) of the step based on log weight
         '''
-        return 1 / np.sum(self.weights ** 2, axis=0)
+        return 1 / np.sum(self.weights ** 2, axis=1)
 
     @package_for_user
     def compute_mean(self):
         '''
         Returns the estimated mean of each parameter.
         '''
-        return np.sum(self.params * self.weights, axis=0)
+        return np.sum(self.params * self.weights, axis=1)
 
     @package_for_user
     def compute_variance(self):
@@ -183,7 +179,7 @@ class ParallelParticles(Checks):
         '''
         means = self.compute_mean(package=False)
         norm = 1 - np.sum(self.weights ** 2)
-        return np.sum(self.weights * (self.params - means) ** 2, axis=0) / norm
+        return np.sum(self.weights * (self.params - means) ** 2, axis=1) / norm
 
     @package_for_user
     def compute_std_dev(self):
@@ -201,7 +197,7 @@ class ParallelParticles(Checks):
                                             self.params.shape[2]))
         for i in range(self._parallel):
             cov[i] = np.cov(self.params[i].T, ddof=0, 
-                                aweights=self.weights[:,i].flatten())
+                    aweights=self.weights[i,:].flatten())
 
         #if cov.shape == ():
         #    cov = cov.reshape(1, 1)

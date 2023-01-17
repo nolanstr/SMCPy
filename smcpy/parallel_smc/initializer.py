@@ -73,23 +73,25 @@ class Initializer:
         return particles
 
     def init_particles_from_samples(self, samples, proposal_pdensities,
-                                                                parallel=1):
+                                                    param_names, parallel=1):
         '''
         Initialize a set of particles using pre-sampled parameter values and
         the corresponding prior pdf at those values.
 
         :param samples: samples of parameters used to initialize particles;
-            must be a dictionary with keys = parameter names and values =
-            parameter values. Can also be a pandas DataFrame object for this
-            reason.
-        :type samples: dict, pandas.DataFrame
+            must be an array of shape (parallel, particles, num_params) 
+        :type samples: np.array 
         :param proposal_pdensities: corresponding probability density function
             values; must be aligned with samples
         :type proposal_pdensities: list or nd.array
         '''
-        proposal_pdensities = np.array(proposal_pdensities).reshape(-1, 1)
-        log_likes = self.mcmc_kernel.get_log_likelihoods(samples)
-        log_priors = self.mcmc_kernel.get_log_priors(samples)
+        proposal_pdensities = np.array(proposal_pdensities).reshape(parallel,-1)
+        log_likes = self.mcmc_kernel.get_log_likelihoods(samples
+                                                        ).reshape((parallel,-1))
+        log_priors = self.mcmc_kernel.get_log_priors(samples
+                                                        ).reshape((parallel,-1))
         log_weights = log_priors - np.log(proposal_pdensities)
-        particles = ParallelParticles(samples, log_likes, log_weights, parallel)
+        particles = ParallelParticles(samples, log_likes, log_weights,
+                                                    param_names,
+                                                    parallel=parallel)
         return particles
