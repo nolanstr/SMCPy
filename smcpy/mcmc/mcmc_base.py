@@ -147,7 +147,7 @@ class MCMCBase(ABC):
         new_log_priors = self.evaluate_log_priors(new_inputs)
         new_log_like = self._eval_log_like_if_prior_nonzero(new_log_priors,
                                                             new_inputs)
-
+        
         accpt_ratio = self.acceptance_ratio(new_log_like * phi,
                                             log_like * phi,
                                             new_log_priors, log_priors)
@@ -162,27 +162,29 @@ class MCMCBase(ABC):
     
     def _update_priors(self, new_inputs, rejected):
         ns = 0.01
+        try:
+            multisource_num_pts = self._log_like_func._args[0]
+            multi_idxs = np.array([0] + list(multisource_num_pts))
+            n_params = len(self._priors) - len(multisource_num_pts) 
 
-        multisource_num_pts = self._log_like_func._args[0]
-        multi_idxs = np.array([0] + list(multisource_num_pts))
-        n_params = len(self._priors) - len(multisource_num_pts) 
+            output = self._eval_model(new_inputs)
+            squared_errors = np.square(self._data-output)
 
-        output = self._eval_model(new_inputs)
-        squared_errors = np.square(self._data-output)
+            for i in range(len(multisource_num_pts)):
+                if isinstance(self._priors[n_params+i], InvGamma):
 
-        for i in range(len(multisource_num_pts)):
-            if isinstance(self._priors[n_params+i], InvGamma):
-
-                squared_errors_k_i = squared_errors[:,
-                                                    multi_idxs[i]:multi_idxs[i+1]]
-                SSqk_i = np.sum(squared_errors_k_i, axis=1)
-                var = SSqk_i / multisource_num_pts[i]
-                alpha = 0.5 * (ns + multisource_num_pts[i])
-                self._priors[n_params+i].alpha = alpha
-                betas = 0.5 * (ns*var + SSqk_i)
-                self._priors[n_params+i].beta = np.where(rejected.flatten(),
-                                                self._priors[n_params+i].beta,
-                                                betas)
+                    squared_errors_k_i = squared_errors[:,
+                                                        multi_idxs[i]:multi_idxs[i+1]]
+                    SSqk_i = np.sum(squared_errors_k_i, axis=1)
+                    var = SSqk_i / multisource_num_pts[i]
+                    alpha = 0.5 * (ns + multisource_num_pts[i])
+                    self._priors[n_params+i].alpha = alpha
+                    betas = 0.5 * (ns*var + SSqk_i)
+                    self._priors[n_params+i].beta = np.where(rejected.flatten(),
+                                                    self._priors[n_params+i].beta,
+                                                    betas)
+        except:
+            pass
 
     @staticmethod
     def _is_adapt_iteration(adapt_interval, idx, adapt_delay):

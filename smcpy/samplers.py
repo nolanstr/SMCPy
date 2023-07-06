@@ -122,6 +122,7 @@ class AdaptiveSampler(SamplerBase):
         step_list = [self._initialize(num_particles, proposal)]
 
         phi_sequence = [0]
+
         while phi_sequence[-1] < 1:
             phi = self.optimize_step(step_list[-1], phi_sequence[-1],
                                      target_ess, required_phi)
@@ -130,6 +131,7 @@ class AdaptiveSampler(SamplerBase):
             dphi = phi - phi_sequence[-1]
             if dphi < 1e-12:
                 raise ValueError('dphi too small for convergence')
+            
             step_list.append(self._do_smc_step(step_list[-1], phi, dphi,
                                                num_mcmc_samples))
             phi_sequence.append(phi)
