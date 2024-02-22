@@ -122,7 +122,6 @@ class AdaptiveSampler(SamplerBase):
         step_list = [self._initialize(num_particles, proposal)]
 
         phi_sequence = [0]
-
         while phi_sequence[-1] < 1:
             phi = self.optimize_step(step_list[-1], phi_sequence[-1],
                                      target_ess, required_phi)
@@ -146,6 +145,11 @@ class AdaptiveSampler(SamplerBase):
     def optimize_step(self, particles, phi_old, target_ess=1, required_phi=1):
         if self._single_step_has_pos_ess_margin(phi_old, particles, target_ess):
             return 1
+        # Temporary fix for when proposal /propto posterior
+        if self.predict_ess_margin(phi_old+1e-12, phi_old, particles,
+                                   target_ess) > 1:
+            return 1
+
         phi = bisect(self.predict_ess_margin, phi_old, 1,
                      args=(phi_old, particles, target_ess))
         proposed_phi_list = self._as_phi_list(required_phi)

@@ -71,6 +71,7 @@ if __name__ == '__main__':
     #plotting
     ground_truth = np.concatenate((TRUE_PARAMS.flatten(), TRUE_COV[idx1, idx2]))
     labels = ['a', 'b'] + [f'var{i}' for i in range(init_cov.shape[1])]
+    import pdb;pdb.set_trace()
     plot_mcmc_chain(chain, param_labels=labels, burnin=burnin,
                     include_kde=True)
     plot_pairwise(chain.squeeze().T[burnin+1:], param_labels=labels,
